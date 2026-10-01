@@ -6,6 +6,7 @@ enum Palette {
     static let session = Color(hex: 0xD85A30)   // 5시간 · 코랄
     static let weekly = Color(hex: 0x7F77DD)    // 주간 · 보라
     static let model = Color(hex: 0x1D9E75)     // 모델별 주간 · 청록
+    static let codex = Color(hex: 0x378ADD)     // Codex 전체 · 파랑
     static let warn = Color(hex: 0xBA7517)      // 70% 이상
     static let danger = Color(hex: 0xE24B4A)    // 90% 이상
     static let stale = Color(hex: 0x888780)     // 최신 값이 아님
@@ -19,13 +20,14 @@ enum Palette {
         case .session: return session
         case .weekly: return weekly
         case .model: return model
+        case .codex: return codex
         }
     }
 
     static func statusDot(_ s: FetchStatus) -> Color {
         switch s {
         case .ok: ok
-        case .idle, .tokenExpired: Color.secondary.opacity(0.5)
+        case .idle, .tokenExpired, .apiKeyOnly: Color.secondary.opacity(0.5)
         case .rateLimited, .error: warn
         case .auth, .noCredential: danger
         }

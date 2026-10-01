@@ -42,8 +42,8 @@ import Testing
 
         var q = FetchPolicy()
         q.willCall(now: t0, force: true, interval: 180)
-        #expect(!q.shouldCall(now: t0 + 14, force: true))
-        #expect(q.shouldCall(now: t0 + 15, force: true))
+        #expect(!q.shouldCall(now: t0 + 119, force: true))
+        #expect(q.shouldCall(now: t0 + 120, force: true))
     }
 
     @Test func survivesRestart() throws {

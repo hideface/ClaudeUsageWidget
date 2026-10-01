@@ -3,11 +3,11 @@ import Foundation
 /// API 호출 시점 결정. 원본 위젯의 규칙을 따른다.
 /// - 주기는 최소 120초
 /// - 429: 5 → 10 → 20 → 30분(최대). Retry-After가 더 길면 그 값
-/// - 429 대기 중에는 수동 갱신도 무시, 그 밖에도 수동 갱신은 15초에 한 번까지만
+/// - 429 대기 중에는 수동 갱신도 무시, 그 밖에도 수동 갱신은 2분에 한 번까지만(API를 2분보다 자주 부르지 않는다)
 /// - 앱을 다시 켜도 대기 상태를 이어받도록 Codable로 저장한다
 public struct FetchPolicy: Sendable, Equatable, Codable {
     public static let minInterval: TimeInterval = 120
-    public static let forceThrottle: TimeInterval = 15
+    public static let forceThrottle: TimeInterval = 120
     public static let firstBackoff: TimeInterval = 300
     public static let maxBackoff: TimeInterval = 1800
     /// 토큰 없음·만료일 때 다시 확인하는 간격. CLI가 토큰을 갱신하면 곧 따라잡는다.

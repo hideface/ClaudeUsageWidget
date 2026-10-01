@@ -95,3 +95,24 @@ public struct ChainCredentialProvider: CredentialProvider {
         ])
     }
 }
+
+/// 구독 로그인 없이 API 키만 쓰는지 판단한다(값은 읽지 않고 키 이름만 본다).
+public enum AuthHints {
+    /// Claude Code: `~/.claude.json`에 `primaryApiKey`가 있거나, 구독 계정(`oauthAccount`) 없이 승인한 API 키가 있으면 API 키 사용자.
+    public static func claudeUsesAPIKey(claudeJSON: URL) -> Bool {
+        guard let data = try? Data(contentsOf: claudeJSON),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        if j["oauthAccount"] != nil { return false }
+        if let k = j["primaryApiKey"] as? String, !k.isEmpty { return true }
+        if let r = j["customApiKeyResponses"] as? [String: Any], let a = r["approved"] as? [Any], !a.isEmpty { return true }
+        return false
+    }
+
+    /// Codex: `~/.codex/auth.json`의 `auth_mode`가 "apikey"면 API 키 사용자(구독은 "chatgpt").
+    public static func codexUsesAPIKey(authJSON: URL) -> Bool {
+        guard let data = try? Data(contentsOf: authJSON),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        if let mode = j["auth_mode"] as? String { return mode.lowercased() == "apikey" }
+        return (j["OPENAI_API_KEY"] as? String).map { !$0.isEmpty } ?? false && j["tokens"] == nil
+    }
+}

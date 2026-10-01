@@ -4,6 +4,7 @@ import UsageCore
 
 struct SettingsView: View {
     @Bindable var settings: AppSettings
+    var store: UsageStore? = nil
     var onTestAlert: () -> Void
     @State private var loginOn = false
     @State private var loginError: String?
@@ -12,13 +13,39 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("일반") {
-                Picker("한도 조회 주기", selection: $settings.interval) {
-                    ForEach([120.0, 180, 300, 600], id: \.self) { Text("\(Int($0 / 60))분").tag($0) }
+            Section {
+                Toggle("Claude", isOn: $settings.showClaude).disabled(settings.showClaude && !settings.showCodex)
+                Toggle("Codex", isOn: $settings.showCodex).disabled(settings.showCodex && !settings.showClaude)
+            } header: {
+                Text("표시할 서비스")
+            } footer: {
+                Text("쓰지 않는 서비스는 끄세요. Claude를 끄면 키체인·사용량 API에 접근하지 않습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("CLI 토큰 자동 갱신", isOn: $settings.autoRefreshClaudeToken)
+                    .disabled(!settings.showClaude)
+                if let last = store?.lastRefresh {
+                    LabeledContent("마지막 자동 갱신", value: RefreshText.describe(last))
                 }
+            } header: {
+                Text("Claude")
+            } footer: {
+                Text("CLI 토큰이 만료되면(약 8시간마다) 앱이 claude를 짧게 한 번 실행해 CLI가 스스로 토큰을 갱신하게 합니다. 갱신마다 약 500토큰을 씁니다. 끄면 데스크톱 앱 기록이나 마지막 값으로 보여 줍니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("일반") {
                 Picker("메뉴바 표시", selection: $settings.menubarStyle) {
                     ForEach(MenubarStyle.allCases) { Text($0.label).tag($0) }
                 }
+                Picker("패널 크기", selection: $settings.compactPanel) {
+                    Text("기본 (도넛)").tag(false)
+                    Text("작게 (가로 막대)").tag(true)
+                }
+                Picker("Claude 한도 조회 주기", selection: $settings.interval) {
+                    ForEach([120.0, 180, 300, 600], id: \.self) { Text("\(Int($0 / 60))분").tag($0) }
+                }
+                .disabled(!settings.showClaude)
                 Toggle("로그인 시 자동 실행", isOn: Binding(get: { loginOn }, set: { on in
                     loginError = settings.setLaunchAtLogin(on)
                     loginOn = settings.launchAtLogin
@@ -61,16 +88,18 @@ struct SettingsView: View {
 final class SettingsWindowController {
     private var window: NSWindow?
     private let settings: AppSettings
+    private let store: UsageStore?
     private let onTestAlert: () -> Void
 
-    init(settings: AppSettings, onTestAlert: @escaping () -> Void) {
+    init(settings: AppSettings, store: UsageStore? = nil, onTestAlert: @escaping () -> Void) {
         self.settings = settings
+        self.store = store
         self.onTestAlert = onTestAlert
     }
 
     func show() {
         if window == nil {
-            let host = NSHostingController(rootView: SettingsView(settings: settings, onTestAlert: onTestAlert))
+            let host = NSHostingController(rootView: SettingsView(settings: settings, store: store, onTestAlert: onTestAlert))
             host.sizingOptions = .preferredContentSize
             let w = NSWindow(contentViewController: host)
             w.title = "Claude Usage Bar 설정"

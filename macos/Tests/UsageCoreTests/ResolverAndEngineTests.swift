@@ -35,11 +35,13 @@ private func snapshot(at t: Date, five: Double = 42, fiveReset: Date? = nil) -> 
         #expect(d.active?.kind == .session)
     }
 
-    @Test func passedResetIsDropped() {
+    @Test func passedResetIsReestimated() {
         let api = snapshot(at: now - 7200, fiveReset: now - 60)
         let d = DisplayResolver.resolve(api: api, desktop: DesktopSample(t: now - 60, fiveHour: 3, weekly: 20),
                                         status: .tokenExpired, plan: nil, now: now, interval: 180)
-        #expect(d.fiveHour?.resetsAt == nil)
+        // 지난 리셋은 버리고, 데스크톱 기록으로 추정한다(기록이 하나뿐이면 그 시각을 창 시작으로)
+        #expect(d.fiveHour?.resetsAt == now - 60 + 5 * 3600)
+        #expect(d.fiveHour?.resetEstimated == true)
     }
 
     @Test func everythingOldIsStale() {

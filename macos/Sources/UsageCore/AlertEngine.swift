@@ -36,6 +36,10 @@ public struct AlertState: Sendable, Equatable, Codable {
     var history: [String: [Point]] = [:]
     /// 리셋 시각을 모를 때(데스크톱 기록) 주기를 구분하는 번호. 사용률이 크게 떨어지면 올린다.
     var cycles: [String: Int] = [:]
+    /// 한도별로 이번 주기의 리셋 시각. Codex 로그의 resets_at은 이벤트마다 ±1초씩 흔들려서,
+    /// 5분 안의 차이는 같은 주기로 본다. (옵셔널이라 예전 alerts.json도 그대로 읽힌다)
+    var resetAnchors: [String: Date]? = nil
+    static let resetTolerance: TimeInterval = 300
     var creditSeen: Double?
     var lastCreditNote: Date = .distantPast
 
@@ -56,7 +60,7 @@ public struct AlertState: Sendable, Equatable, Codable {
             h.removeAll { sampleTime.timeIntervalSince($0.t) > 5400 }
             history[row.id] = h
 
-            let cycle = row.resetsAt.map { "\(Int($0.timeIntervalSince1970))" } ?? "c\(cycles[row.id, default: 0])"
+            let cycle = cycleKey(row)
             let key = "\(row.id)|\(cycle)"
             let left = Format.left(until: row.resetsAt, now: now).map { "\($0) 후 리셋" } ?? "리셋 시각 모름"
             let pct = Format.percent(p)
@@ -99,6 +103,18 @@ public struct AlertState: Sendable, Equatable, Codable {
             }
         }
         return s.enabled ? out : []
+    }
+
+    /// 리셋 시각을 알면 그 시각(흔들림은 흡수), 모르면 사용률 급락으로 센 주기 번호.
+    private mutating func cycleKey(_ row: LimitRow) -> String {
+        guard let reset = row.resetsAt else { return "c\(cycles[row.id, default: 0])" }
+        var anchors = resetAnchors ?? [:]
+        if let a = anchors[row.id], abs(a.timeIntervalSince(reset)) <= Self.resetTolerance {
+            return "\(Int(a.timeIntervalSince1970))"
+        }
+        anchors[row.id] = reset
+        resetAnchors = anchors
+        return "\(Int(reset.timeIntervalSince1970))"
     }
 
     /// 처음이면 기록하고 true.

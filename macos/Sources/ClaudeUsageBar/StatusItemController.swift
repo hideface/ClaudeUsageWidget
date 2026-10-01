@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 import UsageCore
 
-/// 메뉴바 항목. 형식은 설정(①~④)을 따르고 기본은 ④ 도넛 + 숫자 3개(5시간 · 주간 · 모델별 최고치).
-/// ③·④가 노치 뒤로 가려지면 ②로 줄이고, 10분마다·화면 구성이 바뀔 때 다시 넓혀 본다.
+/// 메뉴바 항목 하나. 켜진 서비스마다 [도넛 + 숫자] 조각을 이어 붙인다: `◔ 13 · 27 · 11  ◔ 45`
+/// - Claude 조각은 설정의 형식(①~④)을 따르고, Codex 조각은 도넛 + 가장 높은 %(①·③이면 도넛만)
+/// - 노치 뒤로 가려지면 한 단계 줄이고(③·④ → ②, ② → ①: 숫자 없이 도넛만), 10분마다·화면 구성이 바뀔 때 다시 넓혀 본다
+/// - 도넛은 텍스트 안의 이미지 첨부로 넣어서, 글자색은 메뉴바 밝기에 맞춰 시스템이 정한다
 @MainActor
 final class StatusItemController: NSObject {
     private let store: UsageStore
@@ -15,6 +17,8 @@ final class StatusItemController: NSObject {
     private var hasBeenVisible = false
     private var lastExpandTry = Date.distantPast
     private var observers: [NSObjectProtocol] = []
+    /// 마지막으로 그린 내용. 같으면 다시 그리지 않는다(10초마다 호출됨).
+    private var lastSignature = ""
 
     init(store: UsageStore, openSettings: @escaping () -> Void) {
         self.store = store
@@ -34,6 +38,7 @@ final class StatusItemController: NSObject {
             b.target = self
             b.action = #selector(clicked(_:))
             b.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            b.imagePosition = .noImage
         }
         render()
 
@@ -50,23 +55,48 @@ final class StatusItemController: NSObject {
 
     var effectiveStyle: MenubarStyle {
         let s = store.settings.menubarStyle
-        return compact && s.rawValue >= MenubarStyle.threeDonuts.rawValue ? .donutActive : s
+        guard compact else { return s }
+        return s.rawValue >= MenubarStyle.threeDonuts.rawValue ? .donutActive : .donut
+    }
+
+    /// 메뉴바에 보이는 값만 모은 문자열(%, 색을 정하는 상태, 형식, 서비스). 바뀌었을 때만 다시 그린다.
+    private func signature(style: MenubarStyle) -> String {
+        var parts = ["\(style.rawValue)", "\(store.settings.showClaude)", "\(store.settings.showCodex)",
+                     "\(NSScreen.main?.backingScaleFactor ?? 2)"]
+        if store.settings.showClaude {
+            let d = store.display
+            parts += d.rows.map { "\($0.id)=\(Format.percent($0.percent)):\(d.isStale($0))" } + ["a=\(d.active?.id ?? "")"]
+        }
+        if store.settings.showCodex, let c = store.codex {
+            parts += c.rows.map { "\($0.id)=\(Format.percent($0.percent))" } + ["cs=\(c.isStale)"]
+        }
+        return parts.joined(separator: "|")
     }
 
     func render() {
         guard let b = item.button else { return }
-        let d = store.display
+        b.toolTip = tooltip()
+        if compact, Date().timeIntervalSince(lastExpandTry) > 600 { tryExpand(); return }
         let style = effectiveStyle
-        b.image = Self.image(d, style: style, scale: NSScreen.main?.backingScaleFactor ?? 2)
-        let title = Self.titleText(d, style: style)
-        b.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
-        b.attributedTitle = NSAttributedString(string: title.isEmpty ? "" : " " + title, attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular),
-            .baselineOffset: 0.5,
-        ])
-        b.toolTip = tooltip(d)
-
-        if compact, Date().timeIntervalSince(lastExpandTry) > 600 { tryExpand() }
+        let sig = signature(style: style)
+        guard sig != lastSignature else { return }
+        lastSignature = sig
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let segs = Self.segments(store, style: style)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        let out = NSMutableAttributedString()
+        for (i, seg) in segs.enumerated() {
+            if i > 0 { out.append(NSAttributedString(string: "   ", attributes: [.font: font])) }
+            if let img = Self.render(seg.image, scale: scale) {
+                let a = NSTextAttachment()
+                a.image = img
+                a.bounds = CGRect(x: 0, y: (font.capHeight - img.size.height) / 2, width: img.size.width, height: img.size.height)
+                out.append(NSAttributedString(attachment: a))
+            }
+            if !seg.text.isEmpty { out.append(NSAttributedString(string: " " + seg.text, attributes: [.font: font])) }
+        }
+        b.image = nil
+        b.attributedTitle = out
     }
 
     func showPanel() {
@@ -76,14 +106,47 @@ final class StatusItemController: NSObject {
         Task { await store.refresh(force: false) }
     }
 
-    private func tooltip(_ d: DisplayState) -> String {
-        var parts = d.rows.map { "\($0.name) \(Format.percent($0.percent))%" }
-        if parts.isEmpty { parts = ["Claude 사용량"] }
-        if d.source == .desktopHistory { parts.append("데스크톱 앱 기록") }
-        return parts.joined(separator: " · ")
+    private func tooltip() -> String {
+        var lines: [String] = []
+        if store.settings.showClaude {
+            let d = store.display
+            let parts = d.rows.map { "\($0.name) \(Format.percent($0.percent))%" }
+            let empty = d.status == .apiKeyOnly ? "API 키 사용 중(구독 한도 없음)" : "데이터 없음"
+            lines.append("Claude  " + (parts.isEmpty ? empty : parts.joined(separator: " · "))
+                         + (d.source == .desktopHistory ? " (데스크톱 앱 기록)" : ""))
+        }
+        if store.settings.showCodex {
+            if let c = store.codex {
+                lines.append("Codex  " + c.rows.map { "\($0.name) \(Format.percent($0.percent))%" }.joined(separator: " · ")
+                             + (c.isStale ? " (\(Format.ago(c.asOf, now: Date())) 값)" : ""))
+            } else {
+                lines.append("Codex  최근 기록 없음")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 
-    // MARK: - 그리기 (스냅샷 모드도 같은 함수를 쓴다)
+    // MARK: - 조각 (스냅샷 모드도 같은 함수를 쓴다)
+
+    struct Segment {
+        var image: AnyView
+        var text: String
+    }
+
+    static func segments(_ store: UsageStore, style: MenubarStyle) -> [Segment] {
+        var out: [Segment] = []
+        if store.settings.showClaude {
+            out.append(Segment(image: imageView(store.display, style: style), text: titleText(store.display, style: style)))
+        }
+        if store.settings.showCodex, let c = store.codex {
+            out.append(Segment(image: AnyView(codexImageView(c)), text: codexTitle(c, style: style)))
+        }
+        if out.isEmpty {
+            out.append(Segment(image: AnyView(Donut(percent: 0, color: Palette.stale, lineWidth: 2.6).frame(width: 15, height: 15)),
+                               text: "–"))
+        }
+        return out
+    }
 
     static func titleText(_ d: DisplayState, style: MenubarStyle) -> String {
         guard let a = d.active else { return style == .donut || style == .threeDonuts ? "" : "–" }
@@ -109,8 +172,19 @@ final class StatusItemController: NSObject {
         return AnyView(Donut(percent: d.active?.percent ?? 0, color: color(d.active), lineWidth: 2.6).frame(width: 15, height: 15))
     }
 
-    static func image(_ d: DisplayState, style: MenubarStyle, scale: CGFloat) -> NSImage? {
-        let r = ImageRenderer(content: imageView(d, style: style))
+    static func codexTitle(_ c: CodexDisplay, style: MenubarStyle) -> String {
+        guard let a = c.active, style != .donut, style != .threeDonuts else { return "" }
+        return style == .donutActive ? "\(Format.percent(a.percent))%" : Format.percent(a.percent)
+    }
+
+    static func codexImageView(_ c: CodexDisplay) -> some View {
+        let a = c.active
+        return Donut(percent: a?.percent ?? 0, color: a.map { Palette.color(for: $0, stale: c.isStale) } ?? Palette.stale,
+                     lineWidth: 2.6).frame(width: 15, height: 15)
+    }
+
+    static func render(_ view: AnyView, scale: CGFloat) -> NSImage? {
+        let r = ImageRenderer(content: view)
         r.scale = scale
         let img = r.nsImage
         img?.isTemplate = false
@@ -123,7 +197,7 @@ final class StatusItemController: NSObject {
         guard let w = item.button?.window else { return }
         let visible = w.occlusionState.contains(.visible)
         if visible { hasBeenVisible = true; return }
-        guard hasBeenVisible, !compact, store.settings.menubarStyle.rawValue >= MenubarStyle.threeDonuts.rawValue else { return }
+        guard hasBeenVisible, !compact, store.settings.menubarStyle != .donut else { return }
         compact = true
         AppLog.write("[menubar] status item hidden (notch?) → compact")
         render()

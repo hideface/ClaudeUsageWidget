@@ -12,6 +12,15 @@ public enum Format {
         return "\(max(1, m))분"
     }
 
+    /// 리셋 시각: "9/30 (화) 04:00"
+    public static func resetAt(_ date: Date?, short: Bool = false) -> String? {
+        guard let date else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = short ? "M/d HH:mm" : "M/d (E) HH:mm"
+        return f.string(from: date)
+    }
+
     /// "3분 전" / "방금"
     public static func ago(_ date: Date, now: Date) -> String {
         let s = Int(now.timeIntervalSince(date))

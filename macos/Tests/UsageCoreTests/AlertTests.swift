@@ -87,4 +87,19 @@ import Testing
         _ = s.evaluate(desk(3, t0 + 900), now: t0 + 900, settings: cfg)
         #expect(s.evaluate(desk(87, t0 + 1800), now: t0 + 1800, settings: cfg).map(\.kind) == [.warn])
     }
+
+    @Test func resetJitterDoesNotRefire() {
+        var s = AlertState()
+        let cfg = AlertSettings()
+        let reset = t0 + 3 * 86400
+        #expect(s.evaluate(display(86, at: t0, reset: reset), now: t0, settings: cfg).map(\.kind) == [.warn])
+        #expect(s.evaluate(display(86, at: t0 + 60, reset: reset + 1), now: t0 + 60, settings: cfg).isEmpty)
+        #expect(s.evaluate(display(87, at: t0 + 120, reset: reset - 1), now: t0 + 120, settings: cfg).isEmpty)
+        #expect(s.evaluate(display(96, at: t0 + 180, reset: reset + 1), now: t0 + 180, settings: cfg).map(\.kind) == [.danger])
+    }
+
+    @Test func oldAlertStateStillDecodes() throws {
+        let old = #"{"notified":[],"history":{},"cycles":{},"lastCreditNote":0}"#
+        #expect(throws: Never.self) { try JSONDecoder().decode(AlertState.self, from: Data(old.utf8)) }
+    }
 }
